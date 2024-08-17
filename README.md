@@ -6,7 +6,9 @@ This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_
 
 ## Features
 
-- Select a folder to scan for duplicate images (Only supports '.png', '.jpg', '.gif', '.bmp', '.tiff' images)
+- Select a folder to scan for duplicate images.
+- Support for various image formats including JPEG, PNG, GIF, BMP, TIFF, WebP, ICO, PPM, TGA
+- Support for common RAW image formats (RAW, ARW, CR2, NEF, ORF, RW2, DNG)
 - Adjust hash size for controlling sensitivity of duplicate detection
 - Display duplicate images in groups
 - Remove selected duplicate images
@@ -22,7 +24,7 @@ This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_
 - Implement database backend to enhance performance for large image collections
 - ~~Add configurable settings for threads, batches, and cache~~ [Done]
 - Introduce undo functionality for deleted images
-- Expand support for additional image formats
+- ~~Expand support for additional image formats~~ [Done]
 - Improve comparison to handle basic image transformations (e.g., rotated images)
 
 ## Requirements
@@ -31,6 +33,8 @@ This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_
 - PyQt5
 - Pillow
 - ImageHash
+- Rawpy
+- Numpy
 
 ## Installation
 
