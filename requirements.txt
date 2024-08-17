@@ -1,3 +1,5 @@
 PyQt5==5.15.11
 Pillow==9.3.0
 ImageHash==4.3.1
+rawpy==0.22.0
+numpy>=2.0.1
