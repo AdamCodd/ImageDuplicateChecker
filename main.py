@@ -5,8 +5,7 @@ from PIL import Image
 import imagehash
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QPushButton, QFileDialog, QLabel, QSpinBox, QScrollArea, 
-                             QCheckBox, QGroupBox, QMessageBox, QComboBox, QMenu, QAction,
-                             QMenuBar, QProgressBar)
+                             QCheckBox, QGroupBox, QMessageBox, QComboBox, QInputDialog, QAction, QProgressBar)
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt, QSize, QThreadPool, QRunnable, pyqtSignal, QObject
 import concurrent.futures
@@ -43,17 +42,26 @@ class LRUCache:
             self.cache.popitem(last=False)
 
 class DuplicateFinderWorker(QRunnable):
-    def __init__(self, folder_path, hash_size, hash_cache, batch_size, check_subfolders):
+    def __init__(self, folder_path, hash_size, hash_cache, batch_size, check_subfolders, num_threads):
         super().__init__()
         self.folder_path = folder_path
         self.hash_size = hash_size
         self.hash_cache = hash_cache
         self.batch_size = batch_size
         self.check_subfolders = check_subfolders
+        self.num_threads = num_threads
         self.signals = WorkerSignals()
 
     def run(self):
-        duplicates, updated_cache = find_similar_images(self.folder_path, self.hash_size, self.hash_cache, self.batch_size, self.check_subfolders, self.signals.progress)
+        duplicates, updated_cache = find_similar_images(
+            self.folder_path, 
+            self.hash_size, 
+            self.hash_cache, 
+            self.batch_size, 
+            self.check_subfolders, 
+            self.signals.progress,
+            self.num_threads
+        )
         self.signals.finished.emit((duplicates, updated_cache))
 
 class ImageDuplicateChecker(QMainWindow):
@@ -70,6 +78,7 @@ class ImageDuplicateChecker(QMainWindow):
         self.items_per_page = 10
         self.batch_size = 100  # Number of images to process in each batch
         self.check_subfolders = False
+        self.num_threads = os.cpu_count() or 1  # Default to system CPU count
         self.initUI()
 
     def initUI(self):
@@ -91,6 +100,10 @@ class ImageDuplicateChecker(QMainWindow):
         self.check_subfolders_action.setChecked(self.check_subfolders)
         self.check_subfolders_action.triggered.connect(self.toggle_check_subfolders)
         optionsMenu.addAction(self.check_subfolders_action)
+
+        self.set_threads_action = QAction('Set number of threads', self)
+        self.set_threads_action.triggered.connect(self.set_num_threads)
+        optionsMenu.addAction(self.set_threads_action)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -213,12 +226,27 @@ class ImageDuplicateChecker(QMainWindow):
         if self.folder_path:
             self.folder_button.setText(f"Selected: {self.folder_path}")
 
+    def set_num_threads(self):
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle("Set Number of Threads")
+        dialog.setLabelText("Enter number of threads to use:")
+        dialog.setInputMode(QInputDialog.IntInput)
+        dialog.setIntRange(1, os.cpu_count() or 1)
+        dialog.setIntValue(self.num_threads)
+        
+        # Remove the '?' button
+        dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+
+        if dialog.exec_() == QInputDialog.Accepted:
+            self.num_threads = dialog.intValue()
+
     def save_preferences(self):
         preferences = {
             'folder_path': self.folder_path,
             'hash_size': self.hash_size_spinbox.value(),
             'items_per_page': self.items_per_page,
-            'check_subfolders': self.check_subfolders
+            'check_subfolders': self.check_subfolders,
+            'num_threads': self.num_threads
         }
         with open('preferences.json', 'w') as f:
             json.dump(preferences, f)
@@ -234,6 +262,7 @@ class ImageDuplicateChecker(QMainWindow):
                 self.items_per_page_combo.setCurrentText(str(self.items_per_page))
                 self.check_subfolders = preferences.get('check_subfolders', False)
                 self.check_subfolders_action.setChecked(self.check_subfolders)
+                self.num_threads = preferences.get('num_threads', os.cpu_count() or 1)
         except FileNotFoundError:
             pass
 
@@ -242,7 +271,7 @@ class ImageDuplicateChecker(QMainWindow):
             return
 
         hash_size = self.hash_size_spinbox.value()
-        worker = DuplicateFinderWorker(self.folder_path, hash_size, self.hash_cache, self.batch_size, self.check_subfolders)
+        worker = DuplicateFinderWorker(self.folder_path, hash_size, self.hash_cache, self.batch_size, self.check_subfolders, self.num_threads)
         worker.signals.finished.connect(self.on_duplicates_found)
         worker.signals.progress.connect(self.update_progress)
         self.threadpool.start(worker)
@@ -411,7 +440,7 @@ def phash(image_path, hash_size=8):
         phash = imagehash.phash(img, hash_size=hash_size)
     return phash
 
-def find_similar_images(folder_path, hash_size=8, hash_cache=None, batch_size=100, check_subfolders=False, progress_callback=None):
+def find_similar_images(folder_path, hash_size=8, hash_cache=None, batch_size=100, check_subfolders=False, progress_callback=None, num_threads=None):
     if hash_cache is None:
         hash_cache = LRUCache(10000)
     
@@ -440,7 +469,7 @@ def find_similar_images(folder_path, hash_size=8, hash_cache=None, batch_size=10
     while processed_images < total_images:
         batch = image_files[processed_images:processed_images + batch_size]
         
-        with concurrent.futures.ThreadPoolExecutor() as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
             futures = [executor.submit(process_image, file_path, hash_size, hash_cache) for file_path in batch]
             
             for future in concurrent.futures.as_completed(futures):
