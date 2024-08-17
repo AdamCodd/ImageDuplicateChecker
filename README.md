@@ -1,6 +1,8 @@
 # ImageDuplicateChecker
 
-A simple Python application with a GUI (PyQt5) for finding and managing duplicate images in a specified folder (I've adapted it from a script that I use to deduplicate image datasets) using [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_hashing) that allows to compare and match images that are similar but not identical (i.e cropped, resized images).
+A simple Python application  with a GUI (PyQt5) for finding and managing duplicate images in a specified folder I've adapted it from a script that I use to deduplicate image datasets.
+
+This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_hashing) that allows to compare and match images that are similar, but not identical (i.e cropped, resized images).
 
 ## Features
 
