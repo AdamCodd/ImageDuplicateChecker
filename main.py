@@ -91,7 +91,7 @@ class ImageDuplicateChecker(QMainWindow):
         # Create Options menu
         optionsMenu = menubar.addMenu('Options')
         
-        # Add actions to the Options menu
+        ## Add actions to the Options menu ##
         self.keep_preferences_action = QAction('Keep current preferences', self, checkable=True)
         self.keep_preferences_action.setChecked(True)
         optionsMenu.addAction(self.keep_preferences_action)
@@ -105,6 +105,15 @@ class ImageDuplicateChecker(QMainWindow):
         self.set_threads_action.triggered.connect(self.set_num_threads)
         optionsMenu.addAction(self.set_threads_action)
 
+        self.set_batch_size_action = QAction('Set batch size', self)
+        self.set_batch_size_action.triggered.connect(self.set_batch_size)
+        optionsMenu.addAction(self.set_batch_size_action)
+
+        self.set_cache_size_action = QAction('Set cache size', self)
+        self.set_cache_size_action.triggered.connect(self.set_cache_size)
+        optionsMenu.addAction(self.set_cache_size_action)
+
+        ## Main Widget ##
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
@@ -159,7 +168,7 @@ class ImageDuplicateChecker(QMainWindow):
         self.duplicate_count_layout.addWidget(self.total_duplicates_label)
         main_layout.addLayout(self.duplicate_count_layout)
 
-        # Results area
+        ## Results area ##
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_content = QWidget()
@@ -167,6 +176,7 @@ class ImageDuplicateChecker(QMainWindow):
         self.scroll_area.setWidget(self.scroll_content)
         main_layout.addWidget(self.scroll_area)
 
+        ## Bottom widgets ##
         # Add pagination controls
         pagination_layout = QHBoxLayout()
         self.prev_button = QPushButton('Previous')
@@ -240,13 +250,42 @@ class ImageDuplicateChecker(QMainWindow):
         if dialog.exec_() == QInputDialog.Accepted:
             self.num_threads = dialog.intValue()
 
+    def set_batch_size(self):
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle("Set Batch Size")
+        dialog.setLabelText("Enter batch size for image processing:")
+        dialog.setInputMode(QInputDialog.IntInput)
+        dialog.setIntRange(1, 1000)
+        dialog.setIntValue(self.batch_size)
+        
+        dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+
+        if dialog.exec_() == QInputDialog.Accepted:
+            self.batch_size = dialog.intValue()
+
+    def set_cache_size(self):
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle("Set Cache Size")
+        dialog.setLabelText("Enter cache size (number of elements):")
+        dialog.setInputMode(QInputDialog.IntInput)
+        dialog.setIntRange(100, 100000)
+        dialog.setIntValue(self.cache_capacity)
+        
+        dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+
+        if dialog.exec_() == QInputDialog.Accepted:
+            self.cache_capacity = dialog.intValue()
+            self.hash_cache = LRUCache(self.cache_capacity)
+
     def save_preferences(self):
         preferences = {
             'folder_path': self.folder_path,
             'hash_size': self.hash_size_spinbox.value(),
             'items_per_page': self.items_per_page,
             'check_subfolders': self.check_subfolders,
-            'num_threads': self.num_threads
+            'num_threads': self.num_threads,
+            'batch_size': self.batch_size,
+            'cache_capacity': self.cache_capacity
         }
         with open('preferences.json', 'w') as f:
             json.dump(preferences, f)
@@ -263,6 +302,9 @@ class ImageDuplicateChecker(QMainWindow):
                 self.check_subfolders = preferences.get('check_subfolders', False)
                 self.check_subfolders_action.setChecked(self.check_subfolders)
                 self.num_threads = preferences.get('num_threads', os.cpu_count() or 1)
+                self.batch_size = preferences.get('batch_size', 100)
+                self.cache_capacity = preferences.get('cache_capacity', 10000)
+                self.hash_cache = LRUCache(self.cache_capacity)
         except FileNotFoundError:
             pass
 
