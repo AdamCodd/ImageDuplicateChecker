@@ -11,8 +11,16 @@ A simple Python application with a GUI (PyQt5) for finding and managing duplicat
 - Pagination for easier navigation of results
 - Progress bar to show scanning progress
 - Multithreading + caching of image hashes for improved performance
+- Batching for lower memory footprint
 - Option to check subfolders
 - Preferences saving and loading
+
+## TODO
+
+- Database backend to improve the performance for very large collections
+- Configurable threads/batchs
+- Undo fonctionnality for erased images
+- Expand support for image formats
 
 ## Requirements
 
