@@ -3,6 +3,8 @@ import os
 import json
 from PIL import Image
 import imagehash
+import rawpy
+import numpy as np
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QPushButton, QFileDialog, QLabel, QSpinBox, QScrollArea, 
                              QCheckBox, QGroupBox, QMessageBox, QComboBox, QInputDialog, QAction, QProgressBar)
@@ -10,18 +12,6 @@ from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt, QSize, QThreadPool, QRunnable, pyqtSignal, QObject
 import concurrent.futures
 from collections import OrderedDict
-
-class ClickableImageLabel(QLabel):
-    def __init__(self, checkbox):
-        super().__init__()
-        self.checkbox = checkbox
-
-    def mousePressEvent(self, event):
-        self.checkbox.setChecked(not self.checkbox.isChecked())
-
-class WorkerSignals(QObject):
-    finished = pyqtSignal(tuple)
-    progress = pyqtSignal(int, int)  # Emits current progress and total
 
 class LRUCache:
     def __init__(self, capacity):
@@ -40,6 +30,10 @@ class LRUCache:
         self.cache[key] = value
         if len(self.cache) > self.capacity:
             self.cache.popitem(last=False)
+
+class WorkerSignals(QObject):
+    finished = pyqtSignal(tuple)
+    progress = pyqtSignal(int, int)  # Emits current progress and total
 
 class DuplicateFinderWorker(QRunnable):
     def __init__(self, folder_path, hash_size, hash_cache, batch_size, check_subfolders, num_threads):
@@ -63,6 +57,14 @@ class DuplicateFinderWorker(QRunnable):
             self.num_threads
         )
         self.signals.finished.emit((duplicates, updated_cache))
+
+class ClickableImageLabel(QLabel):
+    def __init__(self, checkbox):
+        super().__init__()
+        self.checkbox = checkbox
+
+    def mousePressEvent(self, event):
+        self.checkbox.setChecked(not self.checkbox.isChecked())
 
 class ImageDuplicateChecker(QMainWindow):
     def __init__(self):
@@ -471,15 +473,24 @@ class ImageDuplicateChecker(QMainWindow):
         self.check_duplicates()
 
 def is_valid_image(file_path):
-    valid_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff')
+    valid_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp', '.ico', '.ppm', '.tga',
+                        '.raw', '.arw', '.cr2', '.nef', '.orf', '.rw2', '.dng')
     return file_path.lower().endswith(valid_extensions)
 
 def phash(image_path, hash_size=8):
-    with Image.open(image_path) as img:
-        # Convert palette images with transparency to RGBA
-        if img.mode == 'P' and 'transparency' in img.info:
-            img = img.convert('RGBA')
-        phash = imagehash.phash(img, hash_size=hash_size)
+    raw_extensions = ('.raw', '.arw', '.cr2', '.nef', '.orf', '.rw2', '.dng')
+    if image_path.lower().endswith(raw_extensions):
+        with rawpy.imread(image_path) as raw:
+            rgb = raw.postprocess()
+        image = Image.fromarray(rgb)
+    else:
+        image = Image.open(image_path)
+    
+    # Convert palette images with transparency to RGBA
+    if image.mode == 'P' and 'transparency' in image.info:
+        image = image.convert('RGBA')
+    
+    phash = imagehash.phash(image, hash_size=hash_size)
     return phash
 
 def find_similar_images(folder_path, hash_size=8, hash_cache=None, batch_size=100, check_subfolders=False, progress_callback=None, num_threads=None):
