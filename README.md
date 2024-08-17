@@ -1,6 +1,6 @@
 # ImageDuplicateChecker
 
-A simple Python application with a GUI for finding and managing duplicate images in a specified folder (I've adapted it from a script that I use to deduplicate image datasets).
+A simple Python application with a GUI (PyQt5) for finding and managing duplicate images in a specified folder (I've adapted it from a script that I use to deduplicate image datasets).
 
 ## Features
 
