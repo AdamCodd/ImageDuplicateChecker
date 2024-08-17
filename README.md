@@ -20,7 +20,7 @@ This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_
 ## TODO
 
 - Implement database backend to enhance performance for large image collections
-- Add configurable settings for ~~threads~~, batches, and cache
+- ~~Add configurable settings for threads, batches, and cache~~ [Done]
 - Introduce undo functionality for deleted images
 - Expand support for additional image formats
 - Improve comparison to handle basic image transformations (e.g., rotated images)
