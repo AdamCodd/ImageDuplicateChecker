@@ -12,7 +12,7 @@ This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_
 - Remove selected duplicate images
 - Pagination for easier navigation of results
 - Progress bar to show scanning progress
-- Multithreading + LRU caching of image hashes for improved performance
+- Multithreading (configurable threads) + LRU caching of image hashes for improved performance
 - Batching for lower memory footprint
 - Option to check subfolders
 - Preferences saving and loading
@@ -20,7 +20,7 @@ This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_
 ## TODO
 
 - Implement database backend to enhance performance for large image collections
-- Add configurable settings for threads, batches, and cache
+- Add configurable settings for ~~threads~~, batches, and cache
 - Introduce undo functionality for deleted images
 - Expand support for additional image formats
 - Improve comparison to handle basic image transformations (e.g., rotated images)
