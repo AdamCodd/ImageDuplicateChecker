@@ -375,6 +375,7 @@ class ImageDuplicateChecker(QMainWindow):
         start_index = self.current_page * self.items_per_page
         end_index = min(start_index + self.items_per_page, len(self.duplicates))
 
+
         for dup_group in self.duplicates[start_index:end_index]:
             group_box = QGroupBox()
             group_layout = QHBoxLayout(group_box)
@@ -391,6 +392,7 @@ class ImageDuplicateChecker(QMainWindow):
                 
                 checkbox = QCheckBox(f"{os.path.basename(img_path)}\n{img_info}")
                 checkbox.setStyleSheet("QCheckBox { padding: 5px; }")
+                checkbox.setProperty("full_path", img_path)  # Store the full path as a property
                 
                 pixmap = QPixmap(img_path)
                 pixmap = pixmap.scaled(QSize(200, 200), Qt.KeepAspectRatio, Qt.SmoothTransformation)
@@ -439,7 +441,7 @@ class ImageDuplicateChecker(QMainWindow):
                         checkbox = img_widget.layout().itemAt(1).widget()
                         if checkbox.isChecked():
                             selected_count += 1
-                            img_path = os.path.join(self.folder_path, checkbox.text().split('\n')[0])
+                            img_path = checkbox.property("full_path")  # Get the full path from the property
                             selected_files.append(img_path)
 
         if selected_count == 0:
