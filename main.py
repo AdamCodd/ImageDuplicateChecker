@@ -7,7 +7,7 @@ import rawpy
 import numpy as np
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QPushButton, QFileDialog, QLabel, QSpinBox, QScrollArea, 
-                             QCheckBox, QGroupBox, QMessageBox, QComboBox, QInputDialog, QAction, QProgressBar)
+                             QCheckBox, QGroupBox, QMessageBox, QComboBox, QInputDialog, QAction, QProgressBar, QDialog, QGridLayout)
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt, QSize, QThreadPool, QRunnable, pyqtSignal, QObject
 import concurrent.futures
@@ -36,7 +36,7 @@ class WorkerSignals(QObject):
     progress = pyqtSignal(int, int)  # Emits current progress and total
 
 class DuplicateFinderWorker(QRunnable):
-    def __init__(self, folder_path, hash_size, hash_cache, batch_size, check_subfolders, num_threads):
+    def __init__(self, folder_path, hash_size, hash_cache, batch_size, check_subfolders, num_threads, image_formats):
         super().__init__()
         self.folder_path = folder_path
         self.hash_size = hash_size
@@ -44,6 +44,7 @@ class DuplicateFinderWorker(QRunnable):
         self.batch_size = batch_size
         self.check_subfolders = check_subfolders
         self.num_threads = num_threads
+        self.image_formats = image_formats
         self.signals = WorkerSignals()
 
     def run(self):
@@ -54,7 +55,8 @@ class DuplicateFinderWorker(QRunnable):
             self.batch_size, 
             self.check_subfolders, 
             self.signals.progress,
-            self.num_threads
+            self.num_threads,
+            self.image_formats
         )
         self.signals.finished.emit((duplicates, updated_cache))
 
@@ -81,6 +83,8 @@ class ImageDuplicateChecker(QMainWindow):
         self.batch_size = 100  # Number of images to process in each batch
         self.check_subfolders = False
         self.num_threads = os.cpu_count() or 1  # Default to system CPU count
+        self.image_formats = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp', '.ico', '.ppm', '.tga',
+                              '.raw', '.arw', '.cr2', '.nef', '.orf', '.rw2', '.dng']
         self.initUI()
 
     def initUI(self):
@@ -114,6 +118,10 @@ class ImageDuplicateChecker(QMainWindow):
         self.set_cache_size_action = QAction('Set cache size', self)
         self.set_cache_size_action.triggered.connect(self.set_cache_size)
         optionsMenu.addAction(self.set_cache_size_action)
+
+        self.set_image_formats_action = QAction('Filter image formats', self)
+        self.set_image_formats_action.triggered.connect(self.show_image_formats_dialog)
+        optionsMenu.addAction(self.set_image_formats_action)
 
         ## Main Widget ##
         central_widget = QWidget()
@@ -279,6 +287,36 @@ class ImageDuplicateChecker(QMainWindow):
             self.cache_capacity = dialog.intValue()
             self.hash_cache = LRUCache(self.cache_capacity)
 
+    def show_image_formats_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Filter Image Formats")
+        layout = QGridLayout(dialog)
+
+        all_formats = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp', '.ico', '.ppm', '.tga',
+                    '.raw', '.arw', '.cr2', '.nef', '.orf', '.rw2', '.dng']
+        checkboxes = {}
+        row, col = 0, 0
+        for format in all_formats:
+            checkbox = QCheckBox(format)
+            checkbox.setChecked(format in self.image_formats)
+            checkboxes[format] = checkbox
+            layout.addWidget(checkbox, row, col)
+            col += 1
+            if col == 3:  # 3 columns
+                col = 0
+                row += 1
+
+        def on_accept():
+            self.image_formats = [format for format, checkbox in checkboxes.items() if checkbox.isChecked()]
+            dialog.accept()
+
+        accept_button = QPushButton("Apply")
+        accept_button.clicked.connect(on_accept)
+        layout.addWidget(accept_button, row + 1, 0, 1, 3)
+
+        dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        dialog.exec_()
+
     def save_preferences(self):
         preferences = {
             'folder_path': self.folder_path,
@@ -287,7 +325,8 @@ class ImageDuplicateChecker(QMainWindow):
             'check_subfolders': self.check_subfolders,
             'num_threads': self.num_threads,
             'batch_size': self.batch_size,
-            'cache_capacity': self.cache_capacity
+            'cache_capacity': self.cache_capacity,
+            'image_formats': self.image_formats
         }
         with open('preferences.json', 'w') as f:
             json.dump(preferences, f)
@@ -307,15 +346,17 @@ class ImageDuplicateChecker(QMainWindow):
                 self.batch_size = preferences.get('batch_size', 100)
                 self.cache_capacity = preferences.get('cache_capacity', 10000)
                 self.hash_cache = LRUCache(self.cache_capacity)
+                loaded_formats = preferences.get('image_formats', self.image_formats)
+                self.image_formats = loaded_formats
         except FileNotFoundError:
             pass
-
+    
     def check_duplicates(self):
         if not self.folder_path:
             return
 
         hash_size = self.hash_size_spinbox.value()
-        worker = DuplicateFinderWorker(self.folder_path, hash_size, self.hash_cache, self.batch_size, self.check_subfolders, self.num_threads)
+        worker = DuplicateFinderWorker(self.folder_path, hash_size, self.hash_cache, self.batch_size, self.check_subfolders, self.num_threads, self.image_formats)
         worker.signals.finished.connect(self.on_duplicates_found)
         worker.signals.progress.connect(self.update_progress)
         self.threadpool.start(worker)
@@ -450,8 +491,8 @@ class ImageDuplicateChecker(QMainWindow):
 
         if selected_count > 1:
             confirm = QMessageBox.question(self, "Confirm Removal", 
-                                           f"Are you sure you want to remove {selected_count} selected images?",
-                                           QMessageBox.Yes | QMessageBox.No)
+                                        f"Are you sure you want to remove {selected_count} selected images?",
+                                        QMessageBox.Yes | QMessageBox.No)
             if confirm == QMessageBox.No:
                 return
 
@@ -474,10 +515,8 @@ class ImageDuplicateChecker(QMainWindow):
         # Refresh the display
         self.check_duplicates()
 
-def is_valid_image(file_path):
-    valid_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp', '.ico', '.ppm', '.tga',
-                        '.raw', '.arw', '.cr2', '.nef', '.orf', '.rw2', '.dng')
-    return file_path.lower().endswith(valid_extensions)
+def is_valid_image(file_path, image_formats):
+    return file_path.lower().endswith(tuple(image_formats))
 
 def phash(image_path, hash_size=8):
     raw_extensions = ('.raw', '.arw', '.cr2', '.nef', '.orf', '.rw2', '.dng')
@@ -494,8 +533,8 @@ def phash(image_path, hash_size=8):
     
     phash = imagehash.phash(image, hash_size=hash_size)
     return phash
-
-def find_similar_images(folder_path, hash_size=8, hash_cache=None, batch_size=100, check_subfolders=False, progress_callback=None, num_threads=None):
+    
+def find_similar_images(folder_path, hash_size=8, hash_cache=None, batch_size=100, check_subfolders=False, progress_callback=None, num_threads=None, image_formats=None):
     if hash_cache is None:
         hash_cache = LRUCache(10000)
     
@@ -506,14 +545,14 @@ def find_similar_images(folder_path, hash_size=8, hash_cache=None, batch_size=10
         for dirpath, _, filenames in os.walk(folder_path):
             for filename in filenames:
                 file_path = os.path.join(dirpath, filename)
-                if is_valid_image(file_path):
+                if is_valid_image(file_path, image_formats):
                     image_files.append(file_path)
                 else:
                     print(f"Skipping non-image file: {file_path}")
     else:
         for filename in os.listdir(folder_path):
             file_path = os.path.join(folder_path, filename)
-            if os.path.isfile(file_path) and is_valid_image(file_path):
+            if os.path.isfile(file_path) and is_valid_image(file_path, image_formats):
                 image_files.append(file_path)
             else:
                 print(f"Skipping non-image file: {file_path}")
