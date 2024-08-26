@@ -25,7 +25,7 @@ This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_
 - ~~Add configurable settings for threads, batches, and cache~~ [Done]
 - Introduce undo functionality for deleted images
 - ~~Expand support for additional image formats~~ [Done]
-- Option to only check certain image extensions
+- ~~Option to only check certain image extensions~~ [Done]
 - Improve comparison to handle basic image transformations (e.g., rotated images)
 
 ## Requirements
