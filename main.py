@@ -1,7 +1,8 @@
 import sys
 import os
 import json
-from PIL import Image
+import cv2
+from PIL import Image, ImageOps
 import imagehash
 import rawpy
 import numpy as np
@@ -36,7 +37,7 @@ class WorkerSignals(QObject):
     progress = pyqtSignal(int, int)  # Emits current progress and total
 
 class DuplicateFinderWorker(QRunnable):
-    def __init__(self, folder_path, hash_size, hash_cache, batch_size, check_subfolders, num_threads, image_formats):
+    def __init__(self, folder_path, hash_size, hash_cache, batch_size, check_subfolders, num_threads, image_formats, check_transformations):
         super().__init__()
         self.folder_path = folder_path
         self.hash_size = hash_size
@@ -45,6 +46,7 @@ class DuplicateFinderWorker(QRunnable):
         self.check_subfolders = check_subfolders
         self.num_threads = num_threads
         self.image_formats = image_formats
+        self.check_transformations = check_transformations
         self.signals = WorkerSignals()
 
     def run(self):
@@ -56,7 +58,8 @@ class DuplicateFinderWorker(QRunnable):
             self.check_subfolders, 
             self.signals.progress,
             self.num_threads,
-            self.image_formats
+            self.image_formats,
+            self.check_transformations
         )
         self.signals.finished.emit((duplicates, updated_cache))
 
@@ -85,6 +88,7 @@ class ImageDuplicateChecker(QMainWindow):
         self.num_threads = os.cpu_count() or 1  # Default to system CPU count
         self.image_formats = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp', '.ico', '.ppm', '.tga',
                               '.raw', '.arw', '.cr2', '.nef', '.orf', '.rw2', '.dng']
+        self.check_transformations = False
         self.initUI()
 
     def initUI(self):
@@ -106,6 +110,11 @@ class ImageDuplicateChecker(QMainWindow):
         self.check_subfolders_action.setChecked(self.check_subfolders)
         self.check_subfolders_action.triggered.connect(self.toggle_check_subfolders)
         optionsMenu.addAction(self.check_subfolders_action)
+
+        self.check_transformations_action = QAction('Check for image transformations', self, checkable=True)
+        self.check_transformations_action.setChecked(self.check_transformations)
+        self.check_transformations_action.triggered.connect(self.toggle_check_transformations)
+        optionsMenu.addAction(self.check_transformations_action)
 
         self.set_threads_action = QAction('Set number of threads', self)
         self.set_threads_action.triggered.connect(self.set_num_threads)
@@ -209,6 +218,11 @@ class ImageDuplicateChecker(QMainWindow):
 
     def toggle_check_subfolders(self):
         self.check_subfolders = self.check_subfolders_action.isChecked()
+
+    def toggle_check_transformations(self):
+        self.check_transformations = self.check_transformations_action.isChecked()
+        # Empty the LRU cache
+        self.hash_cache = LRUCache(self.cache_capacity)
 
     def closeEvent(self, event):
         if self.keep_preferences_action.isChecked():
@@ -326,7 +340,8 @@ class ImageDuplicateChecker(QMainWindow):
             'num_threads': self.num_threads,
             'batch_size': self.batch_size,
             'cache_capacity': self.cache_capacity,
-            'image_formats': self.image_formats
+            'image_formats': self.image_formats,
+            'check_transformations': self.check_transformations
         }
         with open('preferences.json', 'w') as f:
             json.dump(preferences, f)
@@ -348,6 +363,8 @@ class ImageDuplicateChecker(QMainWindow):
                 self.hash_cache = LRUCache(self.cache_capacity)
                 loaded_formats = preferences.get('image_formats', self.image_formats)
                 self.image_formats = loaded_formats
+                self.check_transformations = preferences.get('check_transformations', False)
+                self.check_transformations_action.setChecked(self.check_transformations)
         except FileNotFoundError:
             pass
     
@@ -356,7 +373,7 @@ class ImageDuplicateChecker(QMainWindow):
             return
 
         hash_size = self.hash_size_spinbox.value()
-        worker = DuplicateFinderWorker(self.folder_path, hash_size, self.hash_cache, self.batch_size, self.check_subfolders, self.num_threads, self.image_formats)
+        worker = DuplicateFinderWorker(self.folder_path, hash_size, self.hash_cache, self.batch_size, self.check_subfolders, self.num_threads, self.image_formats, self.check_transformations)
         worker.signals.finished.connect(self.on_duplicates_found)
         worker.signals.progress.connect(self.update_progress)
         self.threadpool.start(worker)
@@ -518,53 +535,160 @@ class ImageDuplicateChecker(QMainWindow):
 def is_valid_image(file_path, image_formats):
     return file_path.lower().endswith(tuple(image_formats))
 
-def phash(image_path, hash_size=8):
+def open_image(image_path):
     raw_extensions = ('.raw', '.arw', '.cr2', '.nef', '.orf', '.rw2', '.dng')
     if image_path.lower().endswith(raw_extensions):
         with rawpy.imread(image_path) as raw:
             rgb = raw.postprocess()
-        image = Image.fromarray(rgb)
+        return Image.fromarray(rgb)
     else:
-        image = Image.open(image_path)
+        return Image.open(image_path)
+
+def preprocess_image(img):
+    if img.mode != 'RGB':
+        img = img.convert('RGB')
+    return img.resize((256, 256), Image.Resampling.LANCZOS)
+
+def compute_color_moment_hash(img, hash_size=8):
+    img_array = np.array(img.resize((hash_size, hash_size)))
+    means = np.mean(img_array, axis=(0, 1))
+    variances = np.var(img_array, axis=(0, 1))
+    skewness = np.mean(((img_array - means) / variances) ** 3, axis=(0, 1))
     
-    # Convert palette images with transparency to RGBA
-    if image.mode == 'P' and 'transparency' in image.info:
-        image = image.convert('RGBA')
+    moments = np.concatenate([means, variances, skewness])
+    hash_bits = (moments > np.median(moments)).astype(int)
     
-    phash = imagehash.phash(image, hash_size=hash_size)
-    return phash
+    # Ensure the hash is the correct size (hash_size * hash_size)
+    hash_bits = np.resize(hash_bits, (hash_size, hash_size))
+    return imagehash.ImageHash(hash_bits)
+
+def compute_edge_hash(img, hash_size=8):
+    img_array = np.array(img.convert('L').resize((hash_size, hash_size)))
+    edges = cv2.Canny(img_array, 100, 200)
     
-def find_similar_images(folder_path, hash_size=8, hash_cache=None, batch_size=100, check_subfolders=False, progress_callback=None, num_threads=None, image_formats=None):
+    # Ensure the hash is the correct size (hash_size * hash_size)
+    edges = np.resize(edges, (hash_size, hash_size))
+    return imagehash.ImageHash(edges > 0)
+
+def compute_hashes(img, hash_size=8):
+    p_hash = imagehash.phash(img, hash_size=hash_size)
+    d_hash = imagehash.dhash(img, hash_size=hash_size)
+    color_hash = compute_color_moment_hash(img, hash_size=hash_size)
+    edge_hash = compute_edge_hash(img, hash_size=hash_size)
+    return p_hash, d_hash, color_hash, edge_hash
+
+def combine_hashes(phash, dhash, color_hash, edge_hash, weights=(0.5, 0.3, 0.1, 0.1)):
+    p_array = np.array(phash.hash.flatten().astype(int))
+    d_array = np.array(dhash.hash.flatten().astype(int))
+    c_array = np.array(color_hash.hash.flatten().astype(int))
+    e_array = np.array(edge_hash.hash.flatten().astype(int))
+    
+    combined = (weights[0] * p_array + weights[1] * d_array + 
+                weights[2] * c_array + weights[3] * e_array)
+    combined = (combined > 0.5).astype(int)
+    
+    return imagehash.ImageHash(combined.reshape((int(np.sqrt(len(combined))), -1)))
+
+def process_image(file_path, hash_size, hash_cache):
+    try:
+        cache_key = f"{file_path}_{hash_size}"
+        cached_hash = hash_cache.get(cache_key)
+        if cached_hash:
+            return imagehash.hex_to_hash(cached_hash), file_path
+
+        with open_image(file_path) as img:
+            img = preprocess_image(img)
+            p_hash, d_hash, color_hash, edge_hash = compute_hashes(img, hash_size)
+            combined_hash = combine_hashes(p_hash, d_hash, color_hash, edge_hash)
+        
+        hash_cache.put(cache_key, str(combined_hash))
+        return combined_hash, file_path
+    except Exception as e:
+        print(f"Error processing {file_path}: {e}")
+        return None
+
+def process_image_transformations(image_path, hash_size, hash_cache):
+    try:
+        cache_key = f"{image_path}_{hash_size}"
+        cached_hash = hash_cache.get(cache_key)
+        if cached_hash:
+            return imagehash.hex_to_hash(cached_hash), image_path
+
+        with open_image(image_path) as img:
+            img = preprocess_image(img)
+
+            transformations = [
+                lambda x: x,  # Original image
+                ImageOps.mirror,
+                ImageOps.flip,
+                ImageOps.exif_transpose,
+                lambda x: x.rotate(90),   # 90 degrees rotation
+                lambda x: x.rotate(180),  # 180 degrees rotation
+                lambda x: x.rotate(270)   # 270 degrees rotation
+            ]
+
+            hashes = [compute_hashes(transform(img), hash_size) for transform in transformations]
+            valid_hashes = [h for h in hashes if all(x is not None for x in h)]
+            
+            if not valid_hashes:
+                raise ValueError("No valid hashes computed")
+            
+            combined_hashes = [combine_hashes(*h) for h in valid_hashes]
+            
+            # Use a strict consensus hash as the final hash
+            consensus_hash = get_consensus_hash(combined_hashes, threshold=0.8)
+            
+            hash_cache.put(cache_key, str(consensus_hash))
+
+        return consensus_hash, image_path
+    except Exception as e:
+        print(f"Error processing {image_path}: {e}")
+        return None
+
+def get_consensus_hash(hashes, threshold=0.8):
+    # Convert hashes to binary arrays
+    binary_hashes = [np.array(h.hash).flatten() for h in hashes]
+    
+    # Calculate the mean for each bit position
+    mean_bits = np.mean(binary_hashes, axis=0)
+    
+    # Apply strict consensus: 1 if >= threshold, 0 if <= (1-threshold), -1 otherwise
+    consensus_bits = np.where(mean_bits >= threshold, 1, 
+                              np.where(mean_bits <= (1-threshold), 0, -1))
+    
+    # Replace any uncertain bits (-1) with the original image's bits
+    original_bits = binary_hashes[0]
+    consensus_bits = np.where(consensus_bits == -1, original_bits, consensus_bits)
+    
+    # Reshape back to square and create ImageHash object
+    hash_size = int(np.sqrt(len(consensus_bits)))
+    return imagehash.ImageHash(consensus_bits.reshape(hash_size, hash_size))
+
+def find_similar_images(folder_path, hash_size=8, hash_cache=None, batch_size=100, check_subfolders=False, progress_callback=None, num_threads=None, image_formats=None, check_transformations=False):
     if hash_cache is None:
         hash_cache = LRUCache(10000)
     
     hashes = {}
     image_files = []
-
-    if check_subfolders:
-        for dirpath, _, filenames in os.walk(folder_path):
-            for filename in filenames:
-                file_path = os.path.join(dirpath, filename)
-                if is_valid_image(file_path, image_formats):
-                    image_files.append(file_path)
-                else:
-                    print(f"Skipping non-image file: {file_path}")
-    else:
-        for filename in os.listdir(folder_path):
-            file_path = os.path.join(folder_path, filename)
+    
+    for dirpath, _, filenames in os.walk(folder_path) if check_subfolders else [(folder_path, None, os.listdir(folder_path))]:
+        for filename in filenames:
+            file_path = os.path.join(dirpath, filename)
             if os.path.isfile(file_path) and is_valid_image(file_path, image_formats):
                 image_files.append(file_path)
             else:
                 print(f"Skipping non-image file: {file_path}")
-
+    
     total_images = len(image_files)
     processed_images = 0
-
+    
+    process_func = process_image_transformations if check_transformations else process_image
+    
     while processed_images < total_images:
         batch = image_files[processed_images:processed_images + batch_size]
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
-            futures = [executor.submit(process_image, file_path, hash_size, hash_cache) for file_path in batch]
+            futures = [executor.submit(process_func, file_path, hash_size, hash_cache) for file_path in batch]
             
             for future in concurrent.futures.as_completed(futures):
                 result = future.result()
@@ -579,24 +703,9 @@ def find_similar_images(folder_path, hash_size=8, hash_cache=None, batch_size=10
         print(f"Processed {processed_images}/{total_images} images")
         if progress_callback:
             progress_callback.emit(processed_images, total_images)
-
+    
     duplicates = [tuple(file_paths) for file_paths in hashes.values() if len(file_paths) > 1]
     return duplicates, hash_cache
-
-def process_image(file_path, hash_size, hash_cache):
-    try:
-        cache_key = f"{file_path}_{hash_size}"
-        cached_hash = hash_cache.get(cache_key)
-        if cached_hash:
-            # Convert the cached string hash back to an ImageHash object
-            file_hash = imagehash.hex_to_hash(cached_hash)
-        else:
-            file_hash = phash(file_path, hash_size=hash_size)
-            hash_cache.put(cache_key, str(file_hash))
-        return (file_hash, file_path)
-    except Exception as e:
-        print(f"Error processing {file_path}: {e}")
-        return None
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
