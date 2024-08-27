@@ -671,13 +671,18 @@ def find_similar_images(folder_path, hash_size=8, hash_cache=None, batch_size=10
     hashes = {}
     image_files = []
     
-    for dirpath, _, filenames in os.walk(folder_path) if check_subfolders else [(folder_path, None, os.listdir(folder_path))]:
-        for filename in filenames:
-            file_path = os.path.join(dirpath, filename)
-            if os.path.isfile(file_path) and is_valid_image(file_path, image_formats):
-                image_files.append(file_path)
-            else:
-                print(f"Skipping non-image file: {file_path}")
+    def scan_directory(dir_path):
+        with os.scandir(dir_path) as entries:
+            for entry in entries:
+                if entry.is_file():
+                    if is_valid_image(entry.path, image_formats):
+                        image_files.append(entry.path)
+                    else:
+                        print(f"Skipping non-image file: {entry.path}")
+                elif check_subfolders and entry.is_dir():
+                    scan_directory(entry.path)
+    
+    scan_directory(folder_path)
     
     total_images = len(image_files)
     processed_images = 0
