@@ -1,14 +1,15 @@
 # ImageDuplicateChecker
 
-A simple Python application  with a GUI (PyQt5) for finding and managing duplicate images in a specified folder I've adapted it from a script that I use to deduplicate image datasets.
+A simple Python application with a GUI (PyQt5) for finding and managing duplicate images in a specified folder I've adapted it from a script that I use to deduplicate image datasets.
 
-This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_hashing) that allows to compare and match images that are similar, but not identical (i.e cropped, resized images).
+This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_hashing) (including dHash, color hash, and edge hash) to compare and match images that are similar but not identical (e.g., grayscale or resized images).
 
 ## Features
 
 - Select a folder to scan for duplicate images.
 - Support for various image formats including JPEG, PNG, GIF, BMP, TIFF, WebP, ICO, PPM, TGA
 - Support for common RAW image formats (RAW, ARW, CR2, NEF, ORF, RW2, DNG)
+- Support basic transformations (flip horizontally/vertically, exif transpose, rotation 90°/180°/270°) 
 - Adjust hash size for controlling sensitivity of duplicate detection
 - Display duplicate images in groups
 - Remove selected duplicate images
@@ -26,7 +27,7 @@ This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_
 - Introduce undo functionality for deleted images
 - ~~Expand support for additional image formats~~ [Done]
 - ~~Option to only check certain image extensions~~ [Done]
-- Improve comparison to handle basic image transformations (e.g., rotated images)
+- ~~Improve comparison to handle basic image transformations (e.g., rotated images)~~ [Done]
 
 ## Requirements
 
@@ -36,6 +37,7 @@ This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_
 - ImageHash
 - Rawpy
 - Numpy
+- opencv-python
 
 ## Installation
 
@@ -73,6 +75,8 @@ python image_duplicate_checker.py
 - The application saves your preferences (selected folder, hash size, items per page, etc.) between sessions.
 - You can toggle the "Keep current preferences" option in the Options menu to control whether preferences are saved on exit.
 - You can check "Check subfolders" to check the subfolders inside the folder.
+- You can check "Check for image transformations" to check more throughfully all images, rotated/flipped images (slower).
+- You can filter a specific image format to check against in "Filter image formats".
 
 ## Contributing
 
