@@ -13,6 +13,7 @@ from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt, QSize, QThreadPool, QRunnable, pyqtSignal, QObject
 import concurrent.futures
 from collections import OrderedDict
+from itertools import islice
 
 class LRUCache:
     def __init__(self, capacity):
@@ -622,9 +623,9 @@ def process_image_transformations(image_path, hash_size, hash_cache):
                 ImageOps.mirror,
                 ImageOps.flip,
                 ImageOps.exif_transpose,
-                lambda x: x.rotate(90),   # 90 degrees rotation
-                lambda x: x.rotate(180),  # 180 degrees rotation
-                lambda x: x.rotate(270)   # 270 degrees rotation
+                lambda x: x.rotate(90),
+                lambda x: x.rotate(180),
+                lambda x: x.rotate(270)
             ]
 
             hashes = [compute_hashes(transform(img), hash_size) for transform in transformations]
@@ -648,18 +649,14 @@ def process_image_transformations(image_path, hash_size, hash_cache):
 def get_consensus_hash(hashes, threshold=0.8):
     # Convert hashes to binary arrays
     binary_hashes = [np.array(h.hash).flatten() for h in hashes]
-    
     # Calculate the mean for each bit position
     mean_bits = np.mean(binary_hashes, axis=0)
-    
     # Apply strict consensus: 1 if >= threshold, 0 if <= (1-threshold), -1 otherwise
     consensus_bits = np.where(mean_bits >= threshold, 1, 
                               np.where(mean_bits <= (1-threshold), 0, -1))
-    
     # Replace any uncertain bits (-1) with the original image's bits
     original_bits = binary_hashes[0]
     consensus_bits = np.where(consensus_bits == -1, original_bits, consensus_bits)
-    
     # Reshape back to square and create ImageHash object
     hash_size = int(np.sqrt(len(consensus_bits)))
     return imagehash.ImageHash(consensus_bits.reshape(hash_size, hash_size))
@@ -690,7 +687,9 @@ def find_similar_images(folder_path, hash_size=8, hash_cache=None, batch_size=10
     process_func = process_image_transformations if check_transformations else process_image
     
     while processed_images < total_images:
-        batch = image_files[processed_images:processed_images + batch_size]
+        batch = list(islice(image_files, processed_images, processed_images + batch_size))
+        if not batch:
+            break
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
             futures = [executor.submit(process_func, file_path, hash_size, hash_cache) for file_path in batch]
