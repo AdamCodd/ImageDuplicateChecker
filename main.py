@@ -548,47 +548,15 @@ def open_image(image_path):
 def preprocess_image(img):
     if img.mode != 'RGB':
         img = img.convert('RGB')
-    return img.resize((256, 256), Image.Resampling.LANCZOS)
+    return img.resize((128, 128), Image.Resampling.LANCZOS)
 
-def compute_color_moment_hash(img, hash_size=8):
-    img_array = np.array(img.resize((hash_size, hash_size)))
-    means = np.mean(img_array, axis=(0, 1))
-    variances = np.var(img_array, axis=(0, 1))
-    skewness = np.mean(((img_array - means) / variances) ** 3, axis=(0, 1))
-    
-    moments = np.concatenate([means, variances, skewness])
-    hash_bits = (moments > np.median(moments)).astype(int)
-    
-    # Ensure the hash is the correct size (hash_size * hash_size)
-    hash_bits = np.resize(hash_bits, (hash_size, hash_size))
-    return imagehash.ImageHash(hash_bits)
-
-def compute_edge_hash(img, hash_size=8):
-    img_array = np.array(img.convert('L').resize((hash_size, hash_size)))
-    edges = cv2.Canny(img_array, 100, 200)
-    
-    # Ensure the hash is the correct size (hash_size * hash_size)
-    edges = np.resize(edges, (hash_size, hash_size))
-    return imagehash.ImageHash(edges > 0)
-
-def compute_hashes(img, hash_size=8):
+def compute_hashes(img, hash_size=6):
     p_hash = imagehash.phash(img, hash_size=hash_size)
     d_hash = imagehash.dhash(img, hash_size=hash_size)
-    color_hash = compute_color_moment_hash(img, hash_size=hash_size)
-    edge_hash = compute_edge_hash(img, hash_size=hash_size)
-    return p_hash, d_hash, color_hash, edge_hash
+    return p_hash, d_hash
 
-def combine_hashes(phash, dhash, color_hash, edge_hash, weights=(0.5, 0.3, 0.1, 0.1)):
-    p_array = np.array(phash.hash.flatten().astype(int))
-    d_array = np.array(dhash.hash.flatten().astype(int))
-    c_array = np.array(color_hash.hash.flatten().astype(int))
-    e_array = np.array(edge_hash.hash.flatten().astype(int))
-    
-    combined = (weights[0] * p_array + weights[1] * d_array + 
-                weights[2] * c_array + weights[3] * e_array)
-    combined = (combined > 0.5).astype(int)
-    
-    return imagehash.ImageHash(combined.reshape((int(np.sqrt(len(combined))), -1)))
+def combine_hashes(phash, dhash):
+    return imagehash.ImageHash(np.bitwise_xor(phash.hash, dhash.hash))
 
 def process_image(file_path, hash_size, hash_cache):
     try:
@@ -599,8 +567,8 @@ def process_image(file_path, hash_size, hash_cache):
 
         with open_image(file_path) as img:
             img = preprocess_image(img)
-            p_hash, d_hash, color_hash, edge_hash = compute_hashes(img, hash_size)
-            combined_hash = combine_hashes(p_hash, d_hash, color_hash, edge_hash)
+            p_hash, d_hash = compute_hashes(img, hash_size)
+            combined_hash = combine_hashes(p_hash, d_hash)
         
         hash_cache.put(cache_key, str(combined_hash))
         return combined_hash, file_path
@@ -622,22 +590,15 @@ def process_image_transformations(image_path, hash_size, hash_cache):
                 lambda x: x,  # Original image
                 ImageOps.mirror,
                 ImageOps.flip,
-                ImageOps.exif_transpose,
                 lambda x: x.rotate(90),
                 lambda x: x.rotate(180),
                 lambda x: x.rotate(270)
             ]
 
             hashes = [compute_hashes(transform(img), hash_size) for transform in transformations]
-            valid_hashes = [h for h in hashes if all(x is not None for x in h)]
+            combined_hashes = [combine_hashes(*h) for h in hashes]
             
-            if not valid_hashes:
-                raise ValueError("No valid hashes computed")
-            
-            combined_hashes = [combine_hashes(*h) for h in valid_hashes]
-            
-            # Use a strict consensus hash as the final hash
-            consensus_hash = get_consensus_hash(combined_hashes, threshold=0.8)
+            consensus_hash = get_consensus_hash(combined_hashes)
             
             hash_cache.put(cache_key, str(consensus_hash))
 
@@ -646,18 +607,10 @@ def process_image_transformations(image_path, hash_size, hash_cache):
         print(f"Error processing {image_path}: {e}")
         return None
 
-def get_consensus_hash(hashes, threshold=0.8):
-    # Convert hashes to binary arrays
+def get_consensus_hash(hashes):
     binary_hashes = [np.array(h.hash).flatten() for h in hashes]
-    # Calculate the mean for each bit position
     mean_bits = np.mean(binary_hashes, axis=0)
-    # Apply strict consensus: 1 if >= threshold, 0 if <= (1-threshold), -1 otherwise
-    consensus_bits = np.where(mean_bits >= threshold, 1, 
-                              np.where(mean_bits <= (1-threshold), 0, -1))
-    # Replace any uncertain bits (-1) with the original image's bits
-    original_bits = binary_hashes[0]
-    consensus_bits = np.where(consensus_bits == -1, original_bits, consensus_bits)
-    # Reshape back to square and create ImageHash object
+    consensus_bits = (mean_bits > 0.5).astype(int)
     hash_size = int(np.sqrt(len(consensus_bits)))
     return imagehash.ImageHash(consensus_bits.reshape(hash_size, hash_size))
 
