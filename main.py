@@ -14,6 +14,7 @@ from PyQt5.QtCore import Qt, QSize, QThreadPool, QRunnable, pyqtSignal, QObject
 import concurrent.futures
 from collections import OrderedDict
 from itertools import islice
+from send2trash import send2trash
 
 class LRUCache:
     def __init__(self, capacity):
@@ -509,7 +510,7 @@ class ImageDuplicateChecker(QMainWindow):
 
         if selected_count > 1:
             confirm = QMessageBox.question(self, "Confirm Removal", 
-                                        f"Are you sure you want to remove {selected_count} selected images?",
+                                        f"Are you sure you want to move {selected_count} selected images to the trash?",
                                         QMessageBox.Yes | QMessageBox.No)
             if confirm == QMessageBox.No:
                 return
@@ -521,10 +522,12 @@ class ImageDuplicateChecker(QMainWindow):
 
         for i, img_path in enumerate(selected_files):
             try:
-                os.remove(img_path)
-                print(f"Removed: {img_path}")
+                # Normalize the file path
+                normalized_path = os.path.normpath(img_path)
+                send2trash(normalized_path)
+                print(f"Moved to trash: {normalized_path}")
             except Exception as e:
-                print(f"Error removing {img_path}: {e}")
+                print(f"Error moving {normalized_path} to trash: {e}")
             self.progress_bar.setValue(i + 1)
         
         # Hide the progress bar
