@@ -12,7 +12,7 @@ This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_
 - Support basic transformations (flip horizontally/vertically, rotation 90°/180°/270°) 
 - Adjust hash size for controlling sensitivity of duplicate detection
 - Display duplicate images in groups
-- Remove selected duplicate images
+- Remove selected duplicate images by moving them to the trash (supports OS X, Windows and Linux).
 - Pagination for easier navigation of results
 - Progress bar to show scanning progress
 - Multithreading (configurable threads) + LRU caching of image hashes for improved performance
