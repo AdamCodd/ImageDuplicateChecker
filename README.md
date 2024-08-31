@@ -9,7 +9,7 @@ This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_
 - Select a folder to scan for duplicate images.
 - Support for various image formats including JPEG, PNG, GIF, BMP, TIFF, WebP, ICO, PPM, TGA
 - Support for common RAW image formats (RAW, ARW, CR2, NEF, ORF, RW2, DNG)
-- Support basic transformations (flip horizontally/vertically, exif transpose, rotation 90°/180°/270°) 
+- Support basic transformations (flip horizontally/vertically, rotation 90°/180°/270°) 
 - Adjust hash size for controlling sensitivity of duplicate detection
 - Display duplicate images in groups
 - Remove selected duplicate images
@@ -24,7 +24,7 @@ This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_
 
 - Implement database backend to enhance performance for large image collections
 - ~~Add configurable settings for threads, batches, and cache~~ [Done]
-- Introduce undo functionality for deleted images
+- ~~Deleted images are moved to the trash instead of being directly erased on all OSes.~~ [Done]
 - ~~Expand support for additional image formats~~ [Done]
 - ~~Option to only check certain image extensions~~ [Done]
 - ~~Improve comparison to handle basic image transformations (e.g., rotated images)~~ [Done]
