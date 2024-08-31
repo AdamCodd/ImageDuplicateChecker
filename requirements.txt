@@ -4,3 +4,4 @@ ImageHash==4.3.1
 rawpy==0.22.0
 numpy>=1.21.0
 opencv-python>=4.9.0.80
+send2trash>=1.8.3
