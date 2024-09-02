@@ -38,6 +38,7 @@ This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_
 - Rawpy
 - Numpy
 - opencv-python
+- Send2Trash
 
 ## Installation
 
