@@ -1,7 +1,6 @@
 import sys
 import os
 import json
-import cv2
 from PIL import Image, ImageOps
 import imagehash
 import rawpy
