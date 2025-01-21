@@ -64,7 +64,7 @@ python image_duplicate_checker.py
 2. Adjust the hash size if needed (lower values increase sensitivity but may produce more false positives).
 3. Click "Check Duplicates" to start the scanning process.
 4. Once complete, review the duplicate groups displayed.
-5. Select images you want to remove and click "Remove Selected" to delete them (there is a confirmation box if you want to erase > 1 image). **Beware, once an image is erased, it's gone forever!**
+5. Select images you want to remove and click "Remove Selected" to delete them (there is a confirmation box if you want to erase > 1 image). **That image will be moved to trash.**
 
 ## Configuration
 
