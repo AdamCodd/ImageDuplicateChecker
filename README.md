@@ -21,6 +21,9 @@ This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_
 - Option to check subfolders
 - Preferences saving and loading
 
+## TODO
+- Export duplicated results into JSON
+- Save selected image states between pages
 
 ## Requirements
 
