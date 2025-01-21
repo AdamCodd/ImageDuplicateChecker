@@ -11,27 +11,12 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt, QSize, QThreadPool, QRunnable, pyqtSignal, QObject
 import concurrent.futures
-from collections import OrderedDict
 from itertools import islice
 from send2trash import send2trash
-
-class LRUCache:
-    def __init__(self, capacity):
-        self.cache = OrderedDict()
-        self.capacity = capacity
-
-    def get(self, key):
-        if key not in self.cache:
-            return None
-        self.cache.move_to_end(key)
-        return self.cache[key]
-
-    def put(self, key, value):
-        if key in self.cache:
-            self.cache.move_to_end(key)
-        self.cache[key] = value
-        if len(self.cache) > self.capacity:
-            self.cache.popitem(last=False)
+import sqlite3
+import time
+import threading
+from queue import Queue
 
 class WorkerSignals(QObject):
     finished = pyqtSignal(tuple)
@@ -72,6 +57,215 @@ class ClickableImageLabel(QLabel):
     def mousePressEvent(self, event):
         self.checkbox.setChecked(not self.checkbox.isChecked())
 
+class SQLiteCache:
+    def __init__(self, db_path='hash_cache.db', capacity=1000000):
+        self.db_path = db_path
+        self.capacity = capacity
+        self.connection_pool = Queue()
+        self.local = threading.local()
+        self.init_db()
+        self.set_capacity(capacity)
+    
+    def set_capacity(self, new_capacity):
+        """Update cache capacity and trim excess entries if needed"""
+        self.capacity = new_capacity
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            conn.execute('BEGIN TRANSACTION')
+            try:
+                cursor.execute('SELECT COUNT(*) FROM hash_cache')
+                count = cursor.fetchone()[0]
+                
+                if count > self.capacity:
+                    cursor.execute('''
+                        DELETE FROM hash_cache 
+                        WHERE file_path IN (
+                            SELECT file_path FROM hash_cache 
+                            ORDER BY last_access ASC 
+                            LIMIT ?
+                        )
+                    ''', (count - self.capacity,))
+                conn.commit()
+            except sqlite3.OperationalError:
+                conn.rollback()
+                pass
+    
+    def init_db(self):
+        conn = self.get_connection()
+        try:
+            with conn:
+                conn.executescript('''
+                    PRAGMA journal_mode=WAL;
+                    PRAGMA busy_timeout=30000;
+                    BEGIN TRANSACTION;
+                    CREATE TABLE IF NOT EXISTS hash_cache (
+                        file_path TEXT PRIMARY KEY,
+                        folder_path TEXT,
+                        hash_size INTEGER,
+                        hash_value TEXT,
+                        file_mtime REAL,
+                        last_access INTEGER,
+                        check_transformations BOOLEAN
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_folder ON hash_cache(folder_path);
+                    CREATE INDEX IF NOT EXISTS idx_last_access ON hash_cache(last_access);
+                    CREATE INDEX IF NOT EXISTS idx_unique_hash ON hash_cache(folder_path, hash_size, hash_value, check_transformations);
+                    COMMIT;
+                ''')
+        finally:
+            self.close_connection()
+    
+    def get_connection(self):
+        if hasattr(self.local, 'connection'):
+            return self.local.connection
+            
+        try:
+            connection = sqlite3.connect(self.db_path, timeout=60.0)
+            connection.execute('PRAGMA journal_mode=WAL')  # Write-Ahead Logging
+            connection.execute('PRAGMA busy_timeout=30000')  # 30 second timeout
+            self.local.connection = connection
+            return connection
+        except sqlite3.Error as e:
+            print(f"Error creating connection: {e}")
+            raise
+
+    def close_connection(self):
+        if hasattr(self.local, 'connection'):
+            try:
+                self.local.connection.close()
+            finally:
+                del self.local.connection
+        
+    def put(self, file_path, hash_value, hash_size, check_transformations=False):
+        try:
+            folder_path = os.path.dirname(file_path)
+            file_mtime = os.path.getmtime(file_path)
+            
+            conn = self.get_connection()
+            with conn:  # This automatically handles commit/rollback
+                cursor = conn.cursor()
+                try:
+                    # First check if entry exists
+                    cursor.execute('''
+                        SELECT file_path FROM hash_cache 
+                        WHERE file_path = ? 
+                        AND hash_size = ?
+                        AND check_transformations = ?
+                    ''', (file_path, hash_size, check_transformations))
+                    
+                    exists = cursor.fetchone() is not None
+                    
+                    if not exists:
+                        # Check capacity before inserting
+                        cursor.execute('SELECT COUNT(*) FROM hash_cache')
+                        count = cursor.fetchone()[0]
+                        
+                        if count >= self.capacity:
+                            cursor.execute('''
+                                DELETE FROM hash_cache 
+                                WHERE file_path IN (
+                                    SELECT file_path FROM hash_cache 
+                                    ORDER BY last_access ASC 
+                                    LIMIT 1
+                                )
+                            ''')
+                    
+                    # Update or insert the entry
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO hash_cache 
+                        (file_path, folder_path, hash_size, hash_value, file_mtime, last_access, check_transformations)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ''', (file_path, folder_path, hash_size, hash_value, file_mtime, int(time.time()), check_transformations))
+                    
+                except sqlite3.Error as e:
+                    print(f"SQLite error in put(): {e}")
+                    raise
+        except OSError as e:
+            print(f"OS error in put(): {e}")
+        finally:
+            self.close_connection()
+
+    def get(self, file_path, hash_size, check_transformations=False):
+        try:
+            current_mtime = os.path.getmtime(file_path)
+            
+            conn = self.get_connection()
+            with conn:
+                cursor = conn.cursor()
+                try:
+                    cursor.execute('''
+                        SELECT hash_value, file_mtime 
+                        FROM hash_cache 
+                        WHERE file_path = ? 
+                        AND hash_size = ?
+                        AND check_transformations = ?
+                    ''', (file_path, hash_size, check_transformations))
+                    
+                    result = cursor.fetchone()
+                    
+                    if result and abs(result[1] - current_mtime) < 0.001:
+                        cursor.execute(
+                            'UPDATE hash_cache SET last_access = ? WHERE file_path = ?',
+                            (int(time.time()), file_path)
+                        )
+                        return result[0]
+                    return None
+                except sqlite3.Error:
+                    return None
+        except OSError:
+            return None
+        finally:
+            self.close_connection()
+
+    def get_folder_hashes(self, folder_path, hash_size, check_transformations=False):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT file_path, hash_value 
+                FROM hash_cache 
+                WHERE folder_path LIKE ? || '%'
+                AND hash_size = ?
+                AND check_transformations = ?
+            ''', (folder_path, hash_size, check_transformations))
+            return {row[0]: row[1] for row in cursor.fetchall()}
+    
+    def clean_invalid_entries(self):
+        """
+        Remove entries for files that no longer exist
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT file_path FROM hash_cache')
+            all_files = cursor.fetchall()
+            
+            for (file_path,) in all_files:
+                if not os.path.exists(file_path):
+                    cursor.execute('DELETE FROM hash_cache WHERE file_path = ?', (file_path,))
+
+    def get_cache_stats(self):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute('SELECT COUNT(*) FROM hash_cache')
+                total_entries = cursor.fetchone()[0]
+                
+                cursor.execute('''
+                    SELECT COUNT(*) FROM 
+                    (SELECT folder_path, hash_size, hash_value, COUNT(*) 
+                    FROM hash_cache 
+                    GROUP BY folder_path, hash_size, hash_value 
+                    HAVING COUNT(*) > 1)
+                ''')
+                duplicate_entries = cursor.fetchone()[0]
+                
+                return {
+                    'total_entries': total_entries,
+                    'duplicate_entries': duplicate_entries
+                }
+            except sqlite3.Error as e:
+                print(f"Error getting cache stats: {e}")
+                return None
+
 class ImageDuplicateChecker(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -79,14 +273,13 @@ class ImageDuplicateChecker(QMainWindow):
         self.folder_path = ""
         self.threadpool = QThreadPool()
         self.cache_file = "hash_cache.json"
-        self.cache_capacity = 10000 # Nb of elements in the cache
-        self.hash_cache = LRUCache(self.cache_capacity)
-        self.load_cache()
+        self.cache_capacity = 1000000 # Nb of elements in the cache
+        self.hash_cache = SQLiteCache(capacity=self.cache_capacity)
         self.current_page = 0
         self.items_per_page = 10
         self.batch_size = 100  # Number of images to process in each batch
-        self.check_subfolders = False
-        self.num_threads = os.cpu_count() or 1  # Default to system CPU count
+        self.check_subfolders = True
+        self.num_threads = min(32, (os.cpu_count() or 1) * 4) # Increased for I/O bound tasks
         self.image_formats = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp', '.ico', '.ppm', '.tga',
                               '.raw', '.arw', '.cr2', '.nef', '.orf', '.rw2', '.dng']
         self.check_transformations = False
@@ -205,7 +398,7 @@ class ImageDuplicateChecker(QMainWindow):
         self.next_button.clicked.connect(self.next_page)
         self.page_label = QLabel('Page 1')
         self.items_per_page_combo = QComboBox()
-        self.items_per_page_combo.addItems(['10', '20', '50', '100'])
+        self.items_per_page_combo.addItems(['10', '20', '50', '100', '500'])
         self.items_per_page_combo.setCurrentText(str(self.items_per_page))
         self.items_per_page_combo.currentTextChanged.connect(self.change_items_per_page)
         
@@ -223,19 +416,11 @@ class ImageDuplicateChecker(QMainWindow):
     def toggle_check_transformations(self):
         self.check_transformations = self.check_transformations_action.isChecked()
         # Empty the LRU cache
-        self.hash_cache = LRUCache(self.cache_capacity)
+        self.hash_cache = SQLiteCache(capacity=self.cache_capacity)
 
     def closeEvent(self, event):
         if self.keep_preferences_action.isChecked():
             self.save_preferences()
-        
-        # Remove the cache file if it exists
-        if os.path.exists(self.cache_file):
-            try:
-                os.remove(self.cache_file)
-                print(f"Cache file '{self.cache_file}' has been removed.")
-            except Exception as e:
-                print(f"Error removing cache file: {e}")
         
         # Call the parent class closeEvent
         super().closeEvent(event)
@@ -266,7 +451,7 @@ class ImageDuplicateChecker(QMainWindow):
         dialog.setWindowTitle("Set Number of Threads")
         dialog.setLabelText("Enter number of threads to use:")
         dialog.setInputMode(QInputDialog.IntInput)
-        dialog.setIntRange(1, os.cpu_count() or 1)
+        dialog.setIntRange(1, os.cpu_count() * 4)
         dialog.setIntValue(self.num_threads)
         
         # Remove the '?' button
@@ -293,14 +478,15 @@ class ImageDuplicateChecker(QMainWindow):
         dialog.setWindowTitle("Set Cache Size")
         dialog.setLabelText("Enter cache size (number of elements):")
         dialog.setInputMode(QInputDialog.IntInput)
-        dialog.setIntRange(100, 100000)
+        dialog.setIntRange(100, 1000000)
         dialog.setIntValue(self.cache_capacity)
         
         dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowContextHelpButtonHint)
 
         if dialog.exec_() == QInputDialog.Accepted:
             self.cache_capacity = dialog.intValue()
-            self.hash_cache = LRUCache(self.cache_capacity)
+            # Update capacity without recreating the cache
+            self.hash_cache.set_capacity(self.cache_capacity)
 
     def show_image_formats_dialog(self):
         dialog = QDialog(self)
@@ -360,8 +546,8 @@ class ImageDuplicateChecker(QMainWindow):
                 self.check_subfolders_action.setChecked(self.check_subfolders)
                 self.num_threads = preferences.get('num_threads', os.cpu_count() or 1)
                 self.batch_size = preferences.get('batch_size', 100)
-                self.cache_capacity = preferences.get('cache_capacity', 10000)
-                self.hash_cache = LRUCache(self.cache_capacity)
+                self.cache_capacity = preferences.get('cache_capacity', 1000000)
+                self.hash_cache = SQLiteCache(capacity=self.cache_capacity)
                 loaded_formats = preferences.get('image_formats', self.image_formats)
                 self.image_formats = loaded_formats
                 self.check_transformations = preferences.get('check_transformations', False)
@@ -374,12 +560,14 @@ class ImageDuplicateChecker(QMainWindow):
             return
 
         hash_size = self.hash_size_spinbox.value()
-        worker = DuplicateFinderWorker(self.folder_path, hash_size, self.hash_cache, self.batch_size, self.check_subfolders, self.num_threads, self.image_formats, self.check_transformations)
+        worker = DuplicateFinderWorker(self.folder_path, hash_size, self.hash_cache, 
+                                    self.batch_size, self.check_subfolders, 
+                                    self.num_threads, self.image_formats, 
+                                    self.check_transformations)
         worker.signals.finished.connect(self.on_duplicates_found)
         worker.signals.progress.connect(self.update_progress)
         self.threadpool.start(worker)
 
-        # Show and reset the progress bar
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
 
@@ -389,7 +577,12 @@ class ImageDuplicateChecker(QMainWindow):
 
     def on_duplicates_found(self, result):
         self.duplicates, self.hash_cache = result
-        self.save_cache()
+        
+        # Clean cache and print stats after scanning is complete
+        self.hash_cache.clean_invalid_entries()
+        stats = self.hash_cache.get_cache_stats()
+        if stats:
+            print(f"Cache stats after scan: {stats}")
         
         # Hide the progress bar
         self.progress_bar.setVisible(False)
@@ -405,19 +598,6 @@ class ImageDuplicateChecker(QMainWindow):
 
         self.current_page = 0
         self.display_duplicates()
-
-    def load_cache(self):
-        try:
-            with open(self.cache_file, 'r') as f:
-                cache_data = json.load(f)
-                for key, value in cache_data.items():
-                    self.hash_cache.put(key, value)  # Store the hash as a string
-        except FileNotFoundError:
-            pass
-
-    def save_cache(self):
-        with open(self.cache_file, 'w') as f:
-            json.dump(dict(self.hash_cache.cache), f)
 
     def display_duplicates(self):
         # Clear previous results
@@ -552,44 +732,60 @@ def preprocess_image(img):
         img = img.convert('RGB')
     return img.resize((128, 128), Image.Resampling.LANCZOS)
 
-def compute_hashes(img, hash_size=6):
-    p_hash = imagehash.phash(img, hash_size=hash_size)
-    d_hash = imagehash.dhash(img, hash_size=hash_size)
+def compute_hashes(img, hash_size=16):
+    p_hash = imagehash.phash(img, hash_size=16)
+    d_hash = imagehash.dhash(img, hash_size=16)
     return p_hash, d_hash
+
+def truncate_hash(hash_obj, new_size):
+    """Truncate a hash to a smaller size by taking the top-left corner."""
+    original = hash_obj.hash
+    new_hash = original[:new_size, :new_size]
+    return imagehash.ImageHash(new_hash)
 
 def combine_hashes(phash, dhash):
     return imagehash.ImageHash(np.bitwise_xor(phash.hash, dhash.hash))
 
 def process_image(file_path, hash_size, hash_cache):
     try:
-        cache_key = f"{file_path}_{hash_size}"
-        cached_hash = hash_cache.get(cache_key)
+        # Only check/store with full hash size
+        cached_hash = hash_cache.get(file_path, 16, check_transformations=False)
         if cached_hash:
-            return imagehash.hex_to_hash(cached_hash), file_path
+            full_hash = imagehash.hex_to_hash(cached_hash)
+            if hash_size != 16:
+                return truncate_hash(full_hash, hash_size), file_path
+            return full_hash, file_path
 
         with open_image(file_path) as img:
             img = preprocess_image(img)
-            p_hash, d_hash = compute_hashes(img, hash_size)
+            p_hash, d_hash = compute_hashes(img)  # Always compute at size 16
             combined_hash = combine_hashes(p_hash, d_hash)
-        
-        hash_cache.put(cache_key, str(combined_hash))
-        return combined_hash, file_path
+            
+            # Store only full-size hash
+            hash_cache.put(file_path, str(combined_hash), 16, check_transformations=False)
+            
+            if hash_size != 16:
+                return truncate_hash(combined_hash, hash_size), file_path
+                
+            return combined_hash, file_path
     except Exception as e:
         print(f"Error processing {file_path}: {e}")
         return None
 
 def process_image_transformations(image_path, hash_size, hash_cache):
     try:
-        cache_key = f"{image_path}_{hash_size}"
-        cached_hash = hash_cache.get(cache_key)
+        # Only check/store with full hash size
+        cached_hash = hash_cache.get(image_path, 16, check_transformations=True)
         if cached_hash:
-            return imagehash.hex_to_hash(cached_hash), image_path
+            full_hash = imagehash.hex_to_hash(cached_hash)
+            if hash_size != 16:
+                return truncate_hash(full_hash, hash_size), image_path
+            return full_hash, image_path
 
         with open_image(image_path) as img:
             img = preprocess_image(img)
-
             transformations = [
-                lambda x: x,  # Original image
+                lambda x: x,
                 ImageOps.mirror,
                 ImageOps.flip,
                 lambda x: x.rotate(90),
@@ -597,14 +793,17 @@ def process_image_transformations(image_path, hash_size, hash_cache):
                 lambda x: x.rotate(270)
             ]
 
-            hashes = [compute_hashes(transform(img), hash_size) for transform in transformations]
+            hashes = [compute_hashes(transform(img)) for transform in transformations]
             combined_hashes = [combine_hashes(*h) for h in hashes]
-            
             consensus_hash = get_consensus_hash(combined_hashes)
             
-            hash_cache.put(cache_key, str(consensus_hash))
-
-        return consensus_hash, image_path
+            # Store only full-size hash
+            hash_cache.put(image_path, str(consensus_hash), 16, check_transformations=True)
+            
+            if hash_size != 16:
+                return truncate_hash(consensus_hash, hash_size), image_path
+                
+            return consensus_hash, image_path
     except Exception as e:
         print(f"Error processing {image_path}: {e}")
         return None
@@ -616,9 +815,13 @@ def get_consensus_hash(hashes):
     hash_size = int(np.sqrt(len(consensus_bits)))
     return imagehash.ImageHash(consensus_bits.reshape(hash_size, hash_size))
 
-def find_similar_images(folder_path, hash_size=8, hash_cache=None, batch_size=100, check_subfolders=False, progress_callback=None, num_threads=None, image_formats=None, check_transformations=False):
+def find_similar_images(folder_path, hash_size=8, hash_cache=None, batch_size=100, 
+                       check_subfolders=False, progress_callback=None, num_threads=None, 
+                       image_formats=None, check_transformations=False):
     if hash_cache is None:
-        hash_cache = LRUCache(10000)
+        hash_cache = SQLiteCache()
+    if num_threads is None:
+        num_threads = min(32, (os.cpu_count() or 1) * 4)  # Optimal for I/O bound tasks
     
     hashes = {}
     image_files = []
@@ -641,27 +844,31 @@ def find_similar_images(folder_path, hash_size=8, hash_cache=None, batch_size=10
     
     process_func = process_image_transformations if check_transformations else process_image
     
-    while processed_images < total_images:
-        batch = list(islice(image_files, processed_images, processed_images + batch_size))
-        if not batch:
-            break
-        
-        with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
-            futures = [executor.submit(process_func, file_path, hash_size, hash_cache) for file_path in batch]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+        while processed_images < total_images:
+            batch = list(islice(image_files, processed_images, processed_images + batch_size))
+            if not batch:
+                break
             
+            futures = [executor.submit(process_func, file_path, hash_size, hash_cache) 
+                      for file_path in batch]
+                
             for future in concurrent.futures.as_completed(futures):
-                result = future.result()
-                if result:
-                    file_hash, file_path = result
-                    if file_hash in hashes:
-                        hashes[file_hash].append(file_path)
-                    else:
-                        hashes[file_hash] = [file_path]
-        
-        processed_images += len(batch)
-        print(f"Processed {processed_images}/{total_images} images")
-        if progress_callback:
-            progress_callback.emit(processed_images, total_images)
+                try:
+                    result = future.result()
+                    if result:
+                        file_hash, file_path = result
+                        if file_hash in hashes:
+                            hashes[file_hash].append(file_path)
+                        else:
+                            hashes[file_hash] = [file_path]
+                except Exception as e:
+                    print(f"Error processing image: {e}")
+            
+            processed_images += len(batch)
+            print(f"Processed {processed_images}/{total_images} images")
+            if progress_callback:
+                progress_callback.emit(processed_images, total_images)
     
     duplicates = [tuple(file_paths) for file_paths in hashes.values() if len(file_paths) > 1]
     return duplicates, hash_cache
