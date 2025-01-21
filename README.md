@@ -15,19 +15,12 @@ This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_
 - Remove selected duplicate images by moving them to the trash (supports OS X, Windows and Linux).
 - Pagination for easier navigation of results
 - Progress bar to show scanning progress
-- Multithreading (configurable threads) + LRU caching of image hashes for improved performance
+- Multithreading (configurable threads)
+- SQLite database for large image collections (auto-erase removed images, configurable capacity)
 - Batching for lower memory footprint
 - Option to check subfolders
 - Preferences saving and loading
 
-## TODO
-
-- Implement database backend to enhance performance for large image collections
-- ~~Add configurable settings for threads, batches, and cache~~ [Done]
-- ~~Deleted images are moved to the trash instead of being directly erased on all OSes.~~ [Done]
-- ~~Expand support for additional image formats~~ [Done]
-- ~~Option to only check certain image extensions~~ [Done]
-- ~~Improve comparison to handle basic image transformations (e.g., rotated images)~~ [Done]
 
 ## Requirements
 
