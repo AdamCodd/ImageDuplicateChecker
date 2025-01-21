@@ -20,9 +20,10 @@ This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_
 - Batching for lower memory footprint
 - Option to check subfolders
 - Preferences saving and loading
+- Export duplicated results into JSON
 
 ## TODO
-- Export duplicated results into JSON
+- ~~Export duplicated results into JSON~~ [Done]
 - Save selected image states between pages
 - Filter by resolution, file size (currently only by image format).
 
