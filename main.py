@@ -326,6 +326,12 @@ class ImageDuplicateChecker(QMainWindow):
         self.set_image_formats_action.triggered.connect(self.show_image_formats_dialog)
         optionsMenu.addAction(self.set_image_formats_action)
 
+        # Create Export menu
+        exportMenu = menubar.addMenu('Export')
+        export_duplicates_action = QAction('Export Duplicates to JSONL', self)
+        export_duplicates_action.triggered.connect(self.export_duplicates)
+        exportMenu.addAction(export_duplicates_action)
+
         ## Main Widget ##
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -714,6 +720,44 @@ class ImageDuplicateChecker(QMainWindow):
 
         # Refresh the display
         self.check_duplicates()
+
+    def export_duplicates(self):
+        if not self.duplicates:
+            QMessageBox.information(self, "No Duplicates", "No duplicates found to export.")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Duplicates",
+            "duplicates.jsonl",
+            "JSONL files (*.jsonl)"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                hash_size = self.hash_size_spinbox.value()
+                for duplicate_group in self.duplicates:
+                    json_obj = {
+                        "hash_size": hash_size,
+                        "duplicate_files": list(duplicate_group)
+                    }
+                    f.write(json.dumps(json_obj, ensure_ascii=False) + '\n')
+
+            QMessageBox.information(
+                self,
+                "Export Successful",
+                f"Successfully exported {len(self.duplicates)} duplicate groups to {file_path}"
+            )
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Export Error",
+                f"Error exporting duplicates: {str(e)}"
+            )
 
 def is_valid_image(file_path, image_formats):
     return file_path.lower().endswith(tuple(image_formats))
