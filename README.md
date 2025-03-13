@@ -19,6 +19,7 @@ This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_
 - SQLite database for large image collections (auto-erase removed images, configurable capacity)
 - Batching for lower memory footprint
 - Option to check subfolders
+- Autoselect duplicated images for quick deletion
 - Preferences saving and loading
 - Export duplicated results into JSON
 
