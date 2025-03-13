@@ -944,15 +944,19 @@ def find_similar_images(folder_path, hash_size=8, hash_cache=None, batch_size=10
     image_files = []
     
     def scan_directory(dir_path):
-        with os.scandir(dir_path) as entries:
-            for entry in entries:
-                if entry.is_file():
-                    if is_valid_image(entry.path, image_formats):
-                        image_files.append(entry.path)
-                    else:
-                        print(f"Skipping non-image file: {entry.path}")
-                elif check_subfolders and entry.is_dir():
-                    scan_directory(entry.path)
+        if check_subfolders:
+            walker = os.walk(dir_path)
+        else:
+            # Only process the top directory if check_subfolders is False
+            walker = [(dir_path, [], [f.name for f in os.scandir(dir_path) if f.is_file()])]
+        
+        for root, _, files in walker:
+            for file in files:
+                file_path = os.path.join(root, file)
+                if is_valid_image(file_path, image_formats):
+                    image_files.append(file_path)
+                else:
+                    print(f"Skipping non-image file: {file_path}")
     
     scan_directory(folder_path)
     
