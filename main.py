@@ -600,7 +600,10 @@ class ImageDuplicateChecker(QMainWindow):
         # Calculate and display duplicate counts
         unique_duplicates = len(self.duplicates)
         total_duplicates = sum(len(group) for group in self.duplicates)
-        self.total_duplicates_label.setText(f"Total duplicates: {total_duplicates} / Unique duplicates: {unique_duplicates}")
+        selected_count = len(self.selected_files)
+        self.total_duplicates_label.setText(
+            f"Total duplicates: {total_duplicates} / Unique duplicates: {unique_duplicates} / Selected images: {selected_count}"
+        )
         self.total_duplicates_label.setVisible(True)  # Show the label
         
         # Print to terminal
@@ -670,6 +673,14 @@ class ImageDuplicateChecker(QMainWindow):
             self.selected_files.add(path)
         else:
             self.selected_files.discard(path)
+        # Update the count label
+        if hasattr(self, 'duplicates') and self.duplicates:
+            total_duplicates = sum(len(group) for group in self.duplicates)
+            unique_duplicates = len(self.duplicates)
+            selected_count = len(self.selected_files)
+            self.total_duplicates_label.setText(
+                f"Total duplicates: {total_duplicates} / Unique duplicates: {unique_duplicates} / Selected images: {selected_count}"
+            )
 
     def update_pagination_controls(self):
         total_pages = (len(self.duplicates) + self.items_per_page - 1) // self.items_per_page
