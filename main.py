@@ -327,6 +327,11 @@ class ImageDuplicateChecker(QMainWindow):
         self.set_image_formats_action.triggered.connect(self.show_image_formats_dialog)
         optionsMenu.addAction(self.set_image_formats_action)
 
+        # Add Auto-select action
+        self.auto_select_action = QAction('Auto-select', self)
+        self.auto_select_action.triggered.connect(self.auto_select_duplicates)
+        menubar.addAction(self.auto_select_action)
+
         # Create Export menu
         exportMenu = menubar.addMenu('Export')
         export_duplicates_action = QAction('Export Duplicates to JSONL', self)
@@ -731,6 +736,29 @@ class ImageDuplicateChecker(QMainWindow):
 
         # Refresh the display
         self.check_duplicates()
+
+    def auto_select_duplicates(self):
+        if not self.duplicates:
+            QMessageBox.information(self, "No Duplicates", "No duplicates found to auto-select.")
+            return
+
+        self.selected_files.clear()  # Clear existing selections
+
+        for duplicate_group in self.duplicates:
+            # Select all but one file from each group
+            files_to_select = list(duplicate_group)[1:]
+            self.selected_files.update(files_to_select)
+
+        # Update the display to show the new selections
+        self.display_duplicates()
+
+        # Update the count label
+        total_duplicates = sum(len(group) for group in self.duplicates)
+        unique_duplicates = len(self.duplicates)
+        selected_count = len(self.selected_files)
+        self.total_duplicates_label.setText(
+            f"Total duplicates: {total_duplicates} / Unique duplicates: {unique_duplicates} / Selected images: {selected_count}"
+        )
 
     def export_duplicates(self):
         if not self.duplicates:
