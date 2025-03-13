@@ -283,6 +283,7 @@ class ImageDuplicateChecker(QMainWindow):
         self.image_formats = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp', '.ico', '.ppm', '.tga',
                               '.raw', '.arw', '.cr2', '.nef', '.orf', '.rw2', '.dng']
         self.check_transformations = False
+        self.selected_files = set()
         self.initUI()
 
     def initUI(self):
@@ -565,6 +566,9 @@ class ImageDuplicateChecker(QMainWindow):
         if not self.folder_path:
             return
 
+        # Clear previous selections
+        self.selected_files.clear()
+
         hash_size = self.hash_size_spinbox.value()
         worker = DuplicateFinderWorker(self.folder_path, hash_size, self.hash_cache, 
                                     self.batch_size, self.check_subfolders, 
@@ -620,7 +624,6 @@ class ImageDuplicateChecker(QMainWindow):
         start_index = self.current_page * self.items_per_page
         end_index = min(start_index + self.items_per_page, len(self.duplicates))
 
-
         for dup_group in self.duplicates[start_index:end_index]:
             group_box = QGroupBox()
             group_layout = QHBoxLayout(group_box)
@@ -639,6 +642,12 @@ class ImageDuplicateChecker(QMainWindow):
                 checkbox.setStyleSheet("QCheckBox { padding: 5px; }")
                 checkbox.setProperty("full_path", img_path)  # Store the full path as a property
                 
+                # Restore checkbox state
+                checkbox.setChecked(img_path in self.selected_files)
+                
+                # Connect checkbox state change to selection tracking
+                checkbox.stateChanged.connect(lambda state, path=img_path: self.update_selection(state, path))
+                
                 pixmap = QPixmap(img_path)
                 pixmap = pixmap.scaled(QSize(200, 200), Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 img_label = ClickableImageLabel(checkbox)
@@ -655,6 +664,12 @@ class ImageDuplicateChecker(QMainWindow):
 
         self.scroll_layout.addStretch(1)
         self.update_pagination_controls()
+
+    def update_selection(self, state, path):
+        if state == Qt.Checked:
+            self.selected_files.add(path)
+        else:
+            self.selected_files.discard(path)
 
     def update_pagination_controls(self):
         total_pages = (len(self.duplicates) + self.items_per_page - 1) // self.items_per_page
@@ -674,43 +689,28 @@ class ImageDuplicateChecker(QMainWindow):
             return "Unknown"
 
     def remove_selected(self):
-        selected_count = 0
-        selected_files = []
-
-        for i in range(self.scroll_layout.count()):
-            group_box = self.scroll_layout.itemAt(i).widget()
-            if isinstance(group_box, QGroupBox):
-                for j in range(group_box.layout().count()):
-                    img_widget = group_box.layout().itemAt(j).widget()
-                    if isinstance(img_widget, QWidget):
-                        checkbox = img_widget.layout().itemAt(1).widget()
-                        if checkbox.isChecked():
-                            selected_count += 1
-                            img_path = checkbox.property("full_path")  # Get the full path from the property
-                            selected_files.append(img_path)
-
-        if selected_count == 0:
+        if not self.selected_files:
             QMessageBox.information(self, "No Selection", "No images selected for removal.")
             return
 
-        if selected_count > 1:
-            confirm = QMessageBox.question(self, "Confirm Removal", 
-                                        f"Are you sure you want to move {selected_count} selected images to the trash?",
-                                        QMessageBox.Yes | QMessageBox.No)
-            if confirm == QMessageBox.No:
-                return
+        confirm = QMessageBox.question(self, "Confirm Removal", 
+                                    f"Are you sure you want to move {len(self.selected_files)} selected images to the trash?",
+                                    QMessageBox.Yes | QMessageBox.No)
+        if confirm == QMessageBox.No:
+            return
 
         # Show and reset the progress bar
         self.progress_bar.setVisible(True)
-        self.progress_bar.setMaximum(len(selected_files))
+        self.progress_bar.setMaximum(len(self.selected_files))
         self.progress_bar.setValue(0)
 
-        for i, img_path in enumerate(selected_files):
+        for i, img_path in enumerate(list(self.selected_files)):
             try:
                 # Normalize the file path
                 normalized_path = os.path.normpath(img_path)
                 send2trash(normalized_path)
                 print(f"Moved to trash: {normalized_path}")
+                self.selected_files.remove(img_path)  # Remove from selections
             except Exception as e:
                 print(f"Error moving {normalized_path} to trash: {e}")
             self.progress_bar.setValue(i + 1)
