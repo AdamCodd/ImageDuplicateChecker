@@ -284,6 +284,7 @@ class ImageDuplicateChecker(QMainWindow):
                               '.raw', '.arw', '.cr2', '.nef', '.orf', '.rw2', '.dng']
         self.check_transformations = False
         self.selected_files = set()
+        self.is_processing = False
         self.initUI()
 
     def initUI(self):
@@ -568,8 +569,22 @@ class ImageDuplicateChecker(QMainWindow):
             pass
     
     def check_duplicates(self):
-        if not self.folder_path:
+        if not self.folder_path or self.is_processing:
             return
+
+        # Disable buttons when we're processing
+        self.is_processing = True
+        self.check_button.setEnabled(False)
+        self.remove_button.setEnabled(False)
+        self.auto_select_action.setEnabled(False)
+
+        # Disable checkbox interactions
+        for i in range(self.scroll_layout.count()):
+            item = self.scroll_layout.itemAt(i)
+            if item and item.widget():
+                group_box = item.widget()
+                for child in group_box.findChildren(QCheckBox):
+                    child.setEnabled(False)
 
         # Clear previous selections
         self.selected_files.clear()
@@ -592,6 +607,12 @@ class ImageDuplicateChecker(QMainWindow):
 
     def on_duplicates_found(self, result):
         self.duplicates, self.hash_cache = result
+        
+        # Re-enable buttons and checkboxes
+        self.is_processing = False
+        self.check_button.setEnabled(True)
+        self.remove_button.setEnabled(True)
+        self.auto_select_action.setEnabled(True) 
         
         # Clean cache and print stats after scanning is complete
         self.hash_cache.clean_invalid_entries()
@@ -705,7 +726,7 @@ class ImageDuplicateChecker(QMainWindow):
             return "Unknown"
 
     def remove_selected(self):
-        if not self.selected_files:
+        if not self.selected_files or self.is_processing:
             QMessageBox.information(self, "No Selection", "No images selected for removal.")
             return
 
@@ -714,6 +735,18 @@ class ImageDuplicateChecker(QMainWindow):
                                     QMessageBox.Yes | QMessageBox.No)
         if confirm == QMessageBox.No:
             return
+
+        self.is_processing = True
+        self.check_button.setEnabled(False)
+        self.remove_button.setEnabled(False)
+        
+        # Disable checkbox interactions
+        for i in range(self.scroll_layout.count()):
+            item = self.scroll_layout.itemAt(i)
+            if item and item.widget():
+                group_box = item.widget()
+                for child in group_box.findChildren(QCheckBox):
+                    child.setEnabled(False)
 
         # Show and reset the progress bar
         self.progress_bar.setVisible(True)
@@ -731,8 +764,11 @@ class ImageDuplicateChecker(QMainWindow):
                 print(f"Error moving {normalized_path} to trash: {e}")
             self.progress_bar.setValue(i + 1)
         
-        # Hide the progress bar
+        # Hide the progress bar and re-enable buttons
         self.progress_bar.setVisible(False)
+        self.is_processing = False
+        self.check_button.setEnabled(True)
+        self.remove_button.setEnabled(True)
 
         # Refresh the display
         self.check_duplicates()
