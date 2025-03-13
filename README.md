@@ -25,7 +25,7 @@ This program uses [perceptual hashing](https://en.wikipedia.org/wiki/Perceptual_
 
 ## TODO
 - ~~Export duplicated results into JSON~~ [Done]
-- Save selected image states between pages
+- ~~Save selected image states between pages~~ [Done]
 - Filter by resolution, file size (currently only by image format).
 
 ## Requirements
