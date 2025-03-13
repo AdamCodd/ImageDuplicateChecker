@@ -223,7 +223,7 @@ class SQLiteCache:
             cursor.execute('''
                 SELECT file_path, hash_value 
                 FROM hash_cache 
-                WHERE folder_path LIKE ? || '%'
+                WHERE (folder_path = ? OR folder_path LIKE ? || '/%')
                 AND hash_size = ?
                 AND check_transformations = ?
             ''', (folder_path, hash_size, check_transformations))
@@ -428,8 +428,6 @@ class ImageDuplicateChecker(QMainWindow):
 
     def toggle_check_transformations(self):
         self.check_transformations = self.check_transformations_action.isChecked()
-        # Empty the LRU cache
-        self.hash_cache = SQLiteCache(capacity=self.cache_capacity)
 
     def closeEvent(self, event):
         if self.keep_preferences_action.isChecked():
