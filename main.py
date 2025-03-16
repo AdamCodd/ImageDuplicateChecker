@@ -59,7 +59,8 @@ class ClickableImageLabel(QLabel):
 
 class SQLiteCache:
     def __init__(self, db_path='hash_cache.db', capacity=1000000):
-        self.db_path = db_path
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        self.db_path = os.path.join(script_dir, db_path)
         self.capacity = capacity
         self.connection_pool = Queue()
         self.local = threading.local()
@@ -541,7 +542,9 @@ class ImageDuplicateChecker(QMainWindow):
             'image_formats': self.image_formats,
             'check_transformations': self.check_transformations
         }
-        with open('preferences.json', 'w') as f:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        pref_path = os.path.join(script_dir, 'preferences.json') 
+        with open(pref_path, 'w') as f:
             json.dump(preferences, f)
 
     def load_preferences(self):
