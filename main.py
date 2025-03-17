@@ -754,7 +754,8 @@ class ImageDuplicateChecker(QMainWindow):
         self.progress_bar.setMaximum(len(self.selected_files))
         self.progress_bar.setValue(0)
 
-        for i, img_path in enumerate(list(self.selected_files)):
+        selected_files_copy = list(self.selected_files)
+        for i, img_path in enumerate(selected_files_copy):
             try:
                 # Normalize the file path
                 normalized_path = os.path.normpath(img_path)
@@ -765,14 +766,32 @@ class ImageDuplicateChecker(QMainWindow):
                 print(f"Error moving {normalized_path} to trash: {e}")
             self.progress_bar.setValue(i + 1)
         
+        # Update duplicates list by removing deleted files and empty groups
+        updated_duplicates = []
+        for group in self.duplicates:
+            updated_group = tuple(file for file in group if file not in selected_files_copy)
+            if len(updated_group) > 1:  # Keep groups with at least 2 files
+                updated_duplicates.append(updated_group)
+        
+        self.duplicates = updated_duplicates
+        
         # Hide the progress bar and re-enable buttons
         self.progress_bar.setVisible(False)
         self.is_processing = False
         self.check_button.setEnabled(True)
         self.remove_button.setEnabled(True)
 
-        # Refresh the display
-        self.check_duplicates()
+        # Update duplicate count display
+        total_duplicates = sum(len(group) for group in self.duplicates)
+        unique_duplicates = len(self.duplicates)
+        selected_count = len(self.selected_files)
+        self.total_duplicates_label.setText(
+            f"Total duplicates: {total_duplicates} / Unique duplicates: {unique_duplicates} / Selected images: {selected_count}"
+        )
+
+        # Refresh the display without rescanning
+        self.current_page = 0  # Reset to first page
+        self.display_duplicates()
 
     def auto_select_duplicates(self):
         if not self.duplicates:
