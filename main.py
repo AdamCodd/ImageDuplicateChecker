@@ -669,10 +669,29 @@ class ImageDuplicateChecker(QMainWindow):
                 img_layout.setContentsMargins(0, 0, 0, 0)
 
                 img_info = self.get_image_info(img_path)
+                file_path = os.path.dirname(img_path)
+                file_name = os.path.basename(img_path)
                 
-                checkbox = QCheckBox(f"{os.path.basename(img_path)}\n{img_info}")
+                pixmap = QPixmap(img_path)
+                pixmap = pixmap.scaled(QSize(200, 200), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                img_label = QLabel()
+                img_label.setPixmap(pixmap)
+                img_label.setAlignment(Qt.AlignCenter)
+                img_layout.addWidget(img_label)
+                
+                # Create a path label with text wrapping
+                path_label = QLabel(file_path)
+                path_label.setWordWrap(True)
+                path_label.setStyleSheet("padding: 0px 5px;")
+                img_layout.addWidget(path_label)
+                
+                # Create checkbox with filename and info
+                checkbox = QCheckBox(f"{file_name}\n{img_info}")
                 checkbox.setStyleSheet("QCheckBox { padding: 5px; }")
                 checkbox.setProperty("full_path", img_path)  # Store the full path as a property
+                
+                # Make the label clickable to toggle the checkbox
+                img_label.mousePressEvent = lambda event, cb=checkbox: cb.setChecked(not cb.isChecked())
                 
                 # Restore checkbox state
                 checkbox.setChecked(img_path in self.selected_files)
@@ -680,15 +699,7 @@ class ImageDuplicateChecker(QMainWindow):
                 # Connect checkbox state change to selection tracking
                 checkbox.stateChanged.connect(lambda state, path=img_path: self.update_selection(state, path))
                 
-                pixmap = QPixmap(img_path)
-                pixmap = pixmap.scaled(QSize(200, 200), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                img_label = ClickableImageLabel(checkbox)
-                img_label.setPixmap(pixmap)
-                img_label.setAlignment(Qt.AlignCenter)
-                img_layout.addWidget(img_label)
-
                 img_layout.addWidget(checkbox)
-
                 group_layout.addWidget(img_widget)
 
             group_layout.addStretch(1)
