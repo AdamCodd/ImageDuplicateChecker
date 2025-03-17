@@ -549,7 +549,9 @@ class ImageDuplicateChecker(QMainWindow):
 
     def load_preferences(self):
         try:
-            with open('preferences.json', 'r') as f:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            pref_path = os.path.join(script_dir, 'preferences.json')
+            with open(pref_path, 'r') as f:
                 preferences = json.load(f)
                 self.folder_path = preferences.get('folder_path', '')
                 self.folder_button.setText(f"Selected: {self.folder_path}" if self.folder_path else "Select Folder")
