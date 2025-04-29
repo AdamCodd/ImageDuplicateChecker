@@ -232,16 +232,49 @@ class SQLiteCache:
     
     def clean_invalid_entries(self):
         """
-        Remove entries for files that no longer exist
+        Remove entries for files that no longer exist more efficiently
+        by processing in batches
         """
+        batch_size = 500
+        total_deleted = 0
+        
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT file_path FROM hash_cache')
-            all_files = cursor.fetchall()
             
-            for (file_path,) in all_files:
-                if not os.path.exists(file_path):
-                    cursor.execute('DELETE FROM hash_cache WHERE file_path = ?', (file_path,))
+            while True:
+                # Get a limited batch of paths
+                cursor.execute('SELECT file_path FROM hash_cache LIMIT ?', (batch_size,))
+                files_batch = cursor.fetchall()
+                
+                # Exit loop when no more records
+                if not files_batch:
+                    break
+                    
+                # Collect invalid paths in this batch
+                invalid_paths = []
+                for (file_path,) in files_batch:
+                    if not os.path.exists(file_path):  # Still need this I/O check
+                        invalid_paths.append(file_path)
+                
+                # If invalid paths found, delete them in a single operation
+                if invalid_paths:
+                    placeholders = ','.join(['?'] * len(invalid_paths))
+                    cursor.execute(f'DELETE FROM hash_cache WHERE file_path IN ({placeholders})', invalid_paths)
+                    total_deleted += cursor.rowcount
+                    
+                # Remove processed paths from consideration to get next batch
+                placeholders = ','.join(['?'] * len(files_batch))
+                path_values = [p[0] for p in files_batch]
+                cursor.execute(f'DELETE FROM hash_cache WHERE file_path IN ({placeholders})', path_values)
+                conn.commit()  # Commit after each batch
+                
+                # Re-insert the valid paths
+                valid_paths = [p[0] for p in files_batch if p[0] not in invalid_paths]
+                if valid_paths:
+                    cursor.executemany('INSERT INTO hash_cache(file_path, folder_path, hash_size, hash_value, file_mtime, last_access, check_transformations) SELECT file_path, folder_path, hash_size, hash_value, file_mtime, last_access, check_transformations FROM hash_cache WHERE file_path = ?', [(p,) for p in valid_paths])
+                    conn.commit()
+            
+            return total_deleted
 
     def get_cache_stats(self):
         with self.get_connection() as conn:
